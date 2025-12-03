@@ -148,10 +148,6 @@ impl Receiver {
     ) -> Result<usize, num::TryFromIntError> {
         let drift = self.timer.drift(timestamp)?.map(ops::Neg::neg);
 
-        // if let Some(drift) = drift {
-        //     println!("{drift:?}");
-        // }
-
         let available = self.n_available_samples();
 
         let chunk = self.rx.read_chunk(available).unwrap();

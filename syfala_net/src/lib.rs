@@ -44,7 +44,6 @@ impl AudioConfig {
     /// `[`self.chunk_size_frames()`](Self::chunk_size_frames)
     #[inline(always)]
     pub fn chunk_size_samples(&self) -> num::NonZeroU32 {
-        println!("{self:?}");
         self.chunk_size_frames()
             .checked_mul(self.n_channels())
             .unwrap()
