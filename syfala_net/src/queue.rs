@@ -7,8 +7,6 @@ use super::*;
 /// Convenience re-export of rtrb
 pub use rtrb;
 
-use core::iter;
-
 /// Sends audio data over a ring buffer, with an internal sample timer to track missed samples.
 ///
 /// Note that everything here is in __samples__, for multichannel data, some extra bookkeeping
@@ -105,7 +103,7 @@ impl Sender {
 
         // SAFETY: Typically, or at least according to the docs, the safety argument here should
         // be the fact that we have correctly initialized the first n_pushed_samples values. We
-        // _have not_. But, this is still ok because all bit patterns for f32 are valid.å
+        // _have not_. But, this is still ok because all bit patterns for f32 are valid.
         unsafe { chunk.commit(n_pushed_samples) }
 
         self.timer.advance_timer(n_pushed_samples);

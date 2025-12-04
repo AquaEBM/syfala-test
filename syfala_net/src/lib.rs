@@ -1,6 +1,6 @@
 //! Implementation of a simple protocol for real-time audio communication and discovery
 
-use core::num;
+use core::{iter, num};
 
 pub mod network;
 

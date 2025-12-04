@@ -5,7 +5,7 @@ use super::*;
 use std::io;
 
 // All packets not starting with either of these are not valid as per our protocol.
-// This not only allows us to identify and distinguish packets that are part of it,
+// This allows us to not only identify and distinguish packets that are part of it,
 // but also quickly eliminate any foreign traffic by only inspecting the first 4 bytes
 
 // Client -> Server
@@ -21,14 +21,15 @@ const PACKET_TYPE_ID_CLIENT_AUDIO: [u8; 4] = *b"SyFa";
 const PACKET_TYPE_ID_SERVER_CONFIG: [u8; 4] = *b"SyFc";
 
 // limit packet sizes to this
-// TODO: we should, nonetheless, still accept larger packets
+// Servers should, nonetheless, still accept larger packets
 const MAX_DATAGRAM_SIZE: num::NonZeroUsize = nz(1452);
 
 pub mod client {
     use super::*;
 
     /// Sends a discovery packet to `dest_addr` address using the given `socket`
-    /// Be sure to enable broadcast if `dest_addr` is a broadcast address
+    /// Be sure to enable broadcasting if `dest_addr` is a broadcast address
+    // Discovery packets are just constant (PACKET_TYPE_ID_CLIENT_DISC) for now
     #[inline]
     pub fn send_discovery(
         socket: &std::net::UdpSocket,
@@ -45,11 +46,12 @@ pub mod client {
 
     #[inline(always)]
     fn parse_config(packet: &[u8]) -> Option<AudioConfig> {
-        let (_id, rem) = packet
+        let payload = packet
             .split_first_chunk()
-            .filter(|&(&message, _)| message == PACKET_TYPE_ID_SERVER_CONFIG)?;
+            .filter(|&(&message, _)| message == PACKET_TYPE_ID_SERVER_CONFIG)?
+            .0;
 
-        let (&n_channels, rem) = rem.split_first_chunk()?;
+        let (&n_channels, rem) = payload.split_first_chunk()?;
         let n_channels = u32::from_le_bytes(n_channels).try_into().unwrap();
 
         let (&buffer_size_frames, _rem) = rem.split_first_chunk()?;
@@ -66,8 +68,8 @@ pub mod client {
         // buffer size in frames: 4 bytes (u32), non zero, little endian
         + size_of::<u32>();
 
-    /// Attempts to receive a server configuration from this socket. If `None` is returned,
-    /// then, a packet was received that wasn't a configuration packet
+    /// Attempts to parse a server configuration from this socket. If `None` is returned,
+    /// a packet has been received that wasn't a configuration packet
     #[inline(always)]
     pub fn try_recv_config(
         socket: &std::net::UdpSocket,
@@ -80,13 +82,13 @@ pub mod client {
     }
 
     /// Allows for writing iterators of samples over the network, using our protocol
-    pub struct AudioSender {
+    pub struct AudioSender<const N: usize = { MAX_DATAGRAM_SIZE.get() }> {
         chunk_size_spls: num::NonZeroUsize,
         // hehehe zero copy yoohoo
-        scratch_buffer: arrayvec::ArrayVec<u8, { MAX_DATAGRAM_SIZE.get() }>,
+        scratch_buffer: arrayvec::ArrayVec<u8, N>,
     }
 
-    impl AudioSender {
+    impl<const N: usize> AudioSender<N> {
         #[inline(always)]
         pub fn new(chunk_size_spls: num::NonZeroUsize) -> Self {
             let mut scratch_buffer = arrayvec::ArrayVec::new_const();
@@ -208,19 +210,26 @@ pub mod client {
 pub mod server {
     use super::*;
 
-    pub enum ServerMessage<T> {
+    #[inline(always)]
+    const fn f32_from_bytes(&bytes: &[u8; 4]) -> f32 {
+        f32::from_bits(u32::from_le_bytes(bytes))
+    }
+
+    type MessageSamplesIter<'a> = iter::Map<core::slice::Iter<'a, [u8; 4]>, fn(&[u8; 4]) -> f32>;
+
+    pub enum ServerMessage<'a> {
         ClientDiscovery,
-        ClientAudio { timestamp: u64, samples: T },
+        ClientAudio {
+            timestamp: u64,
+            samples: MessageSamplesIter<'a>,
+        },
     }
 
     #[inline]
     pub fn recv_message<'b>(
         socket: &std::net::UdpSocket,
         buf: &'b mut [u8],
-    ) -> io::Result<(
-        core::net::SocketAddr,
-        Option<ServerMessage<impl Iterator<Item = f32> + use<'b>>>,
-    )> {
+    ) -> io::Result<(core::net::SocketAddr, Option<ServerMessage<'b>>)> {
         let (bytes_read, peer_addr) = socket.recv_from(buf)?;
 
         let message = buf[..bytes_read]
@@ -233,13 +242,7 @@ pub mod server {
 
                     let timestamp = u64::from_le_bytes(timestamp);
 
-                    let samples = sample_bytes
-                        .as_chunks()
-                        .0
-                        .iter()
-                        .copied()
-                        .map(u32::from_le_bytes)
-                        .map(f32::from_bits);
+                    let samples = sample_bytes.as_chunks().0.iter().map(f32_from_bytes as _);
 
                     Some(ServerMessage::ClientAudio { timestamp, samples })
                 } else if id == PACKET_TYPE_ID_CLIENT_DISC {
