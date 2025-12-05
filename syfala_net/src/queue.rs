@@ -98,7 +98,7 @@ impl Sender {
             in_samples.into_iter().skip(n_in_samples_skipped),
         ) {
             out_sample.write(in_sample);
-            n_pushed_samples += 1;
+            n_pushed_samples = n_pushed_samples.strict_add(1);
         }
 
         // SAFETY: Typically, or at least according to the docs, the safety argument here should

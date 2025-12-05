@@ -64,9 +64,9 @@ pub mod client {
         // packet_id: 'SyFc' (4 bytes), little endian
         size_of::<[u8 ; 4]>()
         // channel count: 4 bytes (u32), non zero, little endian
-        + size_of::<u32>()
+        .strict_add(size_of::<u32>())
         // buffer size in frames: 4 bytes (u32), non zero, little endian
-        + size_of::<u32>();
+        .strict_add(size_of::<u32>());
 
     /// Attempts to parse a server configuration from this socket. If `None` is returned,
     /// a packet has been received that wasn't a configuration packet
@@ -172,7 +172,7 @@ pub mod client {
             let _ = self.scratch_buffer.drain(4..).count();
 
             self.scratch_buffer
-                .extend(u64::to_le_bytes(timestamp + n_samples));
+                .extend(u64::to_le_bytes(timestamp.strict_add(n_samples)));
             Ok(())
         }
 
@@ -259,9 +259,9 @@ pub mod server {
         // Packet id (4 bytes) (little endian)
         PACKET_TYPE_ID_SERVER_CONFIG.len()
         // channel count (4 bytes, non zero) (little endian)
-        + size_of::<u32>()
+        .strict_add(size_of::<u32>())
         // buffer size in frames (4 bytes, non zero) (little endian)
-        + size_of::<u32>();
+        .strict_add(size_of::<u32>());
 
     #[inline]
     pub fn send_config(
