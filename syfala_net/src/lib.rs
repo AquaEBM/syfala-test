@@ -247,7 +247,10 @@ pub fn start_client<T: TimedReceiver>(
         // Thread 2: listen for and report responses
         let listener_thread = s.spawn(|| {
             loop {
-                if let (peer_addr, Some(config)) = wire::try_recv_config(socket)? {
+                let (peer_addr, maybe_config) = wire::try_recv_config(socket)?;
+
+                if let Some(config) = maybe_config {
+                    
                     config_tx
                         .push((peer_addr, config))
                         .expect("Error: event queue too contended")

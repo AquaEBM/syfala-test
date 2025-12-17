@@ -22,29 +22,49 @@ const PACKET_TYPE_ID_SERVER_CONFIG: [u8; 4] = *b"SyFc";
 // Servers should, nonetheless, still accept larger packets
 const MAX_DATAGRAM_SIZE: num::NonZeroUsize = nz(1452);
 
-/// Sends a discovery packet to `dest_addr` address using the given `socket`
-/// Be sure to enable broadcasting if `dest_addr` is a broadcast address
-// Discovery packets are just constant (PACKET_TYPE_ID_CLIENT_DISC) for now
+const SERVER_CONFIG_PACKET_LEN: usize =
+    // Packet id (4 bytes) (little endian)
+    PACKET_TYPE_ID_SERVER_CONFIG
+        .len()
+        // channel count (4 bytes, non zero) (little endian)
+        .strict_add(size_of::<u32>())
+        // buffer size in frames (4 bytes, non zero) (little endian)
+        .strict_add(size_of::<u32>());
+
 #[inline]
-pub fn send_discovery(
+pub fn send_config(
     socket: &std::net::UdpSocket,
     dest_addr: core::net::SocketAddr,
+    config: AudioConfig,
 ) -> io::Result<()> {
-    let err = socket.send_to(&PACKET_TYPE_ID_CLIENT_DISC, dest_addr);
+    let mut packet_buf = [0u8; SERVER_CONFIG_PACKET_LEN];
 
-    if err? != PACKET_TYPE_ID_CLIENT_DISC.len() {
+    let (packet_type, rem) = packet_buf.split_first_chunk_mut().unwrap();
+    *packet_type = PACKET_TYPE_ID_SERVER_CONFIG;
+
+    let (channel_count, rem) = rem.split_first_chunk_mut().unwrap();
+    *channel_count = config.n_channels().get().to_le_bytes();
+
+    let (buffer_size, rem) = rem.split_first_chunk_mut().unwrap();
+    *buffer_size = config.chunk_size_frames().get().to_le_bytes();
+
+    assert!(rem.is_empty(), "ERROR: missing fields");
+
+    let res = socket.send_to(&packet_buf, dest_addr);
+
+    if res? != SERVER_CONFIG_PACKET_LEN {
         Err(io::ErrorKind::Other.into())
     } else {
         Ok(())
     }
 }
-
+    
 #[inline(always)]
 fn parse_config(packet: &[u8]) -> Option<AudioConfig> {
     let payload = packet
         .split_first_chunk()
         .filter(|&(&message, _)| message == PACKET_TYPE_ID_SERVER_CONFIG)?
-        .0;
+        .1;
 
     let (&n_channels, rem) = payload.split_first_chunk()?;
     let n_channels = u32::from_le_bytes(n_channels).try_into().unwrap();
@@ -54,15 +74,6 @@ fn parse_config(packet: &[u8]) -> Option<AudioConfig> {
 
     Some(AudioConfig::new(n_channels, buffer_size_frames))
 }
-
-const SERVER_CONFIG_PACKET_LEN: usize =
-    // Packet id (4 bytes) (little endian)
-    PACKET_TYPE_ID_SERVER_CONFIG
-        .len()
-        // channel count (4 bytes, non zero) (little endian)
-        .strict_add(size_of::<u32>())
-        // buffer size in frames (4 bytes, non zero) (little endian)
-        .strict_add(size_of::<u32>());
 
 /// Attempts to parse a server configuration from this socket. If `None` is returned,
 /// a packet has been received that wasn't a configuration packet
@@ -191,6 +202,23 @@ impl<const N: usize> AudioSender<N> {
     }
 }
 
+/// Sends a discovery packet to `dest_addr` address using the given `socket`
+/// Be sure to enable broadcasting if `dest_addr` is a broadcast address
+// Discovery packets are just constant (PACKET_TYPE_ID_CLIENT_DISC) for now
+#[inline]
+pub fn send_discovery(
+    socket: &std::net::UdpSocket,
+    dest_addr: core::net::SocketAddr,
+) -> io::Result<()> {
+    let err = socket.send_to(&PACKET_TYPE_ID_CLIENT_DISC, dest_addr);
+
+    if err? != PACKET_TYPE_ID_CLIENT_DISC.len() {
+        Err(io::ErrorKind::Other.into())
+    } else {
+        Ok(())
+    }
+}
+
 pub enum ServerMessage<'a> {
     ClientDiscovery,
     ClientAudio {
@@ -228,32 +256,4 @@ pub fn recv_message<'b>(
         });
 
     return Ok((peer_addr, message));
-}
-
-#[inline]
-pub fn send_config(
-    socket: &std::net::UdpSocket,
-    dest_addr: core::net::SocketAddr,
-    config: AudioConfig,
-) -> io::Result<()> {
-    let mut packet_buf = [0u8; SERVER_CONFIG_PACKET_LEN];
-
-    let (packet_type, rem) = packet_buf.split_first_chunk_mut().unwrap();
-    *packet_type = PACKET_TYPE_ID_SERVER_CONFIG;
-
-    let (channel_count, rem) = rem.split_first_chunk_mut().unwrap();
-    *channel_count = config.n_channels().get().to_le_bytes();
-
-    let (buffer_size, rem) = rem.split_first_chunk_mut().unwrap();
-    *buffer_size = config.chunk_size_frames().get().to_le_bytes();
-
-    assert!(rem.is_empty(), "ERROR: missing fields");
-
-    let res = socket.send_to(&packet_buf, dest_addr);
-
-    if res? != SERVER_CONFIG_PACKET_LEN {
-        Err(io::ErrorKind::Other.into())
-    } else {
-        Ok(())
-    }
 }
